@@ -267,10 +267,17 @@ export async function checkInStudent(
 ): Promise<CheckInResponse> {
   const apiUrl = getGasApiUrl();
 
-  if (isPlaceholderUrl(apiUrl)) {
-    await new Promise((resolve) => setTimeout(resolve, 600));
+  const cleanRoll = rollNumber.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const masterDb = getMasterDatabase();
+  const masterMatch = masterDb.find(
+    (s) => s.roll.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanRoll
+  );
 
-    const cleanRoll = rollNumber.trim().toUpperCase();
+  const resolvedName = (masterMatch && masterMatch.name) || (name && name !== 'Participant' ? name : cleanRoll);
+  const resolvedEmail = (masterMatch && masterMatch.email) || email || '';
+
+  if (isPlaceholderUrl(apiUrl)) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
     if (mockAttendanceLogs.has(cleanRoll)) {
       const existing = mockAttendanceLogs.get(cleanRoll)!;
@@ -288,7 +295,7 @@ export async function checkInStudent(
     }
 
     const now = new Date().toISOString();
-    const newEntry = { name, email, timestamp: now, deviceId };
+    const newEntry = { name: resolvedName, email: resolvedEmail, timestamp: now, deviceId };
     mockAttendanceLogs.set(cleanRoll, newEntry);
 
     return {
@@ -296,8 +303,8 @@ export async function checkInStudent(
       message: 'CHECK-IN CONFIRMED',
       data: {
         roll: cleanRoll,
-        name: name,
-        email: email,
+        name: resolvedName,
+        email: resolvedEmail,
         timestamp: now,
         deviceId: deviceId,
       },

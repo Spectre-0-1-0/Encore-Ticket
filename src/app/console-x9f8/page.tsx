@@ -193,24 +193,17 @@ export default function ObscuredAdminConsolePage() {
   }, [role, activeTab]);
 
   // Callback when a QR frame is captured by html5-qrcode
-  const onScanSuccess = async (decodedText: string) => {
-    if (isScanningRef.current) {
-      if (scannerRef.current) {
-        try {
-          await scannerRef.current.pause(true);
-        } catch (e) {
-          // ignore pause error
-        }
-      }
-      handleProcessPayload(decodedText);
-    }
+  const onScanSuccess = (decodedText: string) => {
+    if (!isScanningRef.current) return;
+    isScanningRef.current = false;
+    handleProcessPayload(decodedText);
   };
 
   const onScanFailure = (error: any) => {
     // Silent ignore frame decode misses
   };
 
-  // Process and Decrypt Hex Payload
+  // Process and Decrypt Payload (Supports Encrypted Hex, Plain Roll Number, or JSON QR codes)
   const handleProcessPayload = async (hexText: string, studentName?: string, studentEmail?: string) => {
     setStatus('PROCESSING');
     setErrorMessage(null);
@@ -221,7 +214,34 @@ export default function ObscuredAdminConsolePage() {
 
     try {
       if (!studentName) {
-        profile = decryptPayload(hexText);
+        try {
+          profile = decryptPayload(hexText);
+        } catch (decErr) {
+          // Fallback: If QR is not encrypted hex, handle plain JSON or raw Roll Number
+          const cleanText = hexText.trim();
+          if (cleanText.startsWith('{') && cleanText.endsWith('}')) {
+            try {
+              const parsed = JSON.parse(cleanText);
+              profile = {
+                roll: (parsed.roll || parsed.rollNumber || '').toUpperCase(),
+                name: parsed.name || 'Participant',
+                email: parsed.email || '',
+                ts: Math.floor(Date.now() / 1000),
+              };
+            } catch (e) {
+              // ignore json parse error
+            }
+          }
+
+          if (!profile || !profile.roll) {
+            profile = {
+              roll: cleanText.replace(/[^a-zA-Z0-9]/g, '').toUpperCase(),
+              name: 'Participant',
+              email: '',
+              ts: Math.floor(Date.now() / 1000),
+            };
+          }
+        }
         setDecryptedStudent(profile);
       } else {
         profile = {
@@ -230,6 +250,10 @@ export default function ObscuredAdminConsolePage() {
           email: studentEmail || '',
           ts: Math.floor(Date.now() / 1000),
         };
+      }
+
+      if (!profile || !profile.roll) {
+        throw new Error('INVALID_QR_CODE: Could not read a valid Roll Number from QR Code.');
       }
 
       const res = await checkInStudent(profile.roll, profile.name, profile.email, 'ADMIN_GATE_01');
@@ -262,14 +286,7 @@ export default function ObscuredAdminConsolePage() {
     setDecryptedStudent(null);
     setErrorMessage(null);
     setManualRoll('');
-
-    if (scannerRef.current) {
-      try {
-        await scannerRef.current.resume();
-      } catch (e) {
-        console.warn('Error resuming scanner:', e);
-      }
-    }
+    isScanningRef.current = true;
   };
 
   // Manual Roll Fallback Submit
