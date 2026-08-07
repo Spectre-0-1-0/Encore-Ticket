@@ -3,7 +3,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { decryptPayload, StudentProfile } from '@/lib/cryptoEngine';
-import { checkInStudent, CheckInResponse, getMasterDatabase, saveMasterDatabase, StudentRecord, getGasApiUrl, setGasApiUrl } from '@/lib/gasApi';
+import {
+  checkInStudent,
+  CheckInResponse,
+  getMasterDatabase,
+  saveMasterDatabase,
+  StudentRecord,
+  getGasApiUrl,
+  setGasApiUrl,
+  getPublicSheetCsvUrl,
+  setPublicSheetCsvUrl,
+  fetchMasterDatabaseFromLiveSheet,
+} from '@/lib/gasApi';
 import { soundEngine } from '@/lib/audioEngine';
 import {
   ShieldAlert,
@@ -58,6 +69,8 @@ export default function ObscuredAdminConsolePage() {
   const [masterRecords, setMasterRecords] = useState<StudentRecord[]>([]);
   const [csvInputText, setCsvInputText] = useState('');
   const [webhookUrlInput, setWebhookUrlInput] = useState('');
+  const [sheetCsvUrlInput, setSheetCsvUrlInput] = useState('');
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
   const [webhookStatusMsg, setWebhookStatusMsg] = useState<string | null>(null);
   const [uploadSuccessMsg, setUploadSuccessMsg] = useState<string | null>(null);
   const [uploadErrorMsg, setUploadErrorMsg] = useState<string | null>(null);
@@ -70,11 +83,35 @@ export default function ObscuredAdminConsolePage() {
   const EXPECTED_ADMIN_PASSCODE = process.env.NEXT_PUBLIC_ADMIN_PASSCODE || 'admin123';
   const EXPECTED_SUPERADMIN_PASSCODE = process.env.NEXT_PUBLIC_SUPERADMIN_PASSCODE || 'superadmin2026';
 
-  // Load initial Master Database records and Webhook URL on mount
+  // Load initial Master Database records and URLs on mount
   useEffect(() => {
     setMasterRecords(getMasterDatabase());
     setWebhookUrlInput(getGasApiUrl());
+    setSheetCsvUrlInput(getPublicSheetCsvUrl());
+    // Auto sync from live published Google Sheet on mount
+    fetchMasterDatabaseFromLiveSheet().then((recs) => setMasterRecords(recs));
   }, []);
+
+  const handleSyncSheetCsv = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSyncingSheet(true);
+    setUploadSuccessMsg(null);
+    setUploadErrorMsg(null);
+
+    if (sheetCsvUrlInput.trim()) {
+      setPublicSheetCsvUrl(sheetCsvUrlInput.trim());
+    }
+
+    const records = await fetchMasterDatabaseFromLiveSheet();
+    setIsSyncingSheet(false);
+
+    if (records.length > 0) {
+      setMasterRecords(records);
+      setUploadSuccessMsg(`Successfully synced ${records.length} student records live from Google Sheet!`);
+    } else {
+      setUploadErrorMsg('Failed to sync records from Google Sheet CSV URL.');
+    }
+  };
 
   const handleSaveWebhook = (e: React.FormEvent) => {
     e.preventDefault();
@@ -603,34 +640,31 @@ export default function ObscuredAdminConsolePage() {
       ) : (
         /* MASTER SHEET DATABASE UPLOAD TAB (Superadmin Only) */
         <div className="space-y-6">
-          {/* Live Google Sheet Webhook Integration Card */}
-          <div className="glass-panel rounded-2xl p-5 border border-cyan-500/30 bg-slate-900/90 shadow-xl space-y-3">
-            <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
-              <RefreshCw className="w-4 h-4 text-cyan-400" /> Live Google Sheet Webhook Connection
+          {/* Live Published Google Sheet CSV Integration Card */}
+          <div className="glass-panel rounded-2xl p-5 border border-emerald-500/30 bg-slate-900/90 shadow-xl space-y-3">
+            <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 text-emerald-400" /> Live Published Google Sheet CSV Link
             </h3>
             <p className="text-[11px] text-slate-400">
-              Paste your deployed Google Apps Script Web App URL below to sync logins and attendance directly with your live Google Sheet in real time.
+              Connected live to your published Google Sheet CSV. Any row added or updated in your Google Sheet is fetched live by the Student Portal!
             </p>
 
-            <form onSubmit={handleSaveWebhook} className="flex gap-2">
+            <form onSubmit={handleSyncSheetCsv} className="flex gap-2">
               <input
                 type="url"
-                placeholder="https://script.google.com/macros/s/.../exec"
-                value={webhookUrlInput}
-                onChange={(e) => setWebhookUrlInput(e.target.value)}
-                className="flex-1 bg-slate-950 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono outline-none focus:border-cyan-500"
+                placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv"
+                value={sheetCsvUrlInput}
+                onChange={(e) => setSheetCsvUrlInput(e.target.value)}
+                className="flex-1 bg-slate-950 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono outline-none focus:border-emerald-500"
               />
               <button
                 type="submit"
-                className="px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition shrink-0"
+                disabled={isSyncingSheet}
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition shrink-0 flex items-center gap-1.5"
               >
-                Connect Webhook
+                {isSyncingSheet ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : 'Sync Live Sheet'}
               </button>
             </form>
-
-            {webhookStatusMsg && (
-              <p className="text-[11px] font-mono text-emerald-400 font-semibold">{webhookStatusMsg}</p>
-            )}
           </div>
 
           <div className="glass-panel rounded-2xl p-6 border border-purple-500/20 shadow-xl space-y-5">

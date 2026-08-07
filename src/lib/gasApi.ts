@@ -33,6 +33,82 @@ const DEFAULT_MASTER_DB: StudentRecord[] = [
   { roll: '2024ME12', name: 'Rahul Verma', email: 'rahul@example.com' },
 ];
 
+export const DEFAULT_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTWsY8sFblILMkwZBbS8ksjNW7YEvjpNgv8HxXI2fO0lX1uzT-pgQp1wI3o-fOzpdzAhcPXnmR30MIi/pub?output=csv';
+
+/**
+ * Get configured Public Google Sheet CSV URL
+ */
+export function getPublicSheetCsvUrl(): string {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('EVENTQR_SHEET_CSV_URL');
+    if (saved && saved.trim().startsWith('https://docs.google.com/spreadsheets')) {
+      return saved.trim();
+    }
+  }
+  return process.env.NEXT_PUBLIC_SHEET_CSV_URL || DEFAULT_SHEET_CSV_URL;
+}
+
+/**
+ * Save custom Public Google Sheet CSV URL
+ */
+export function setPublicSheetCsvUrl(url: string): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('EVENTQR_SHEET_CSV_URL', url.trim());
+}
+
+/**
+ * Parse raw CSV text content into StudentRecord array
+ */
+export function parseCsvTextToRecords(csvText: string): StudentRecord[] {
+  const lines = csvText.split(/\r?\n/);
+  const records: StudentRecord[] = [];
+
+  for (let line of lines) {
+    line = line.trim();
+    if (!line) continue;
+    const parts = line.split(',').map((p) => p.trim().replace(/^["']|["']$/g, ''));
+    if (!parts[0] || parts[0].toUpperCase().includes('ROLL') || parts[0].toUpperCase().includes('STUDENT')) {
+      continue; // Skip header row
+    }
+
+    if (parts.length >= 3) {
+      records.push({
+        roll: parts[0].toUpperCase(),
+        name: parts[1],
+        email: parts[2].toLowerCase(),
+      });
+    } else if (parts.length === 2) {
+      records.push({
+        roll: parts[0].toUpperCase(),
+        name: parts[0],
+        email: parts[1].toLowerCase(),
+      });
+    }
+  }
+  return records;
+}
+
+/**
+ * Fetch and sync latest Master Database from published Google Sheet CSV URL
+ */
+export async function fetchMasterDatabaseFromLiveSheet(): Promise<StudentRecord[]> {
+  const sheetUrl = getPublicSheetCsvUrl();
+  try {
+    const res = await fetch(sheetUrl, { cache: 'no-store' });
+    if (res.ok) {
+      const text = await res.text();
+      const records = parseCsvTextToRecords(text);
+      if (records.length > 0) {
+        saveMasterDatabase(records);
+        return records;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to fetch published Google Sheet CSV:', err);
+  }
+  return getMasterDatabase();
+}
+
 /**
  * Get active Google Apps Script Webhook API URL from localStorage or env
  */
@@ -113,7 +189,7 @@ export async function saveMasterDatabase(records: StudentRecord[]): Promise<void
 }
 
 /**
- * Verify Student credentials against Student_Master database (GAS API & Local Storage)
+ * Verify Student credentials against Student_Master database (GAS API & Live Google Sheet CSV)
  */
 export async function verifyStudent(rollNumber: string, email: string): Promise<VerifyResponse> {
   const cleanRoll = rollNumber.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
@@ -138,18 +214,27 @@ export async function verifyStudent(rollNumber: string, email: string): Promise<
         return data;
       }
     } catch (err: any) {
-      console.warn('GAS Verification API Error, falling back to local database:', err);
+      console.warn('GAS Verification API Error, falling back to live sheet CSV:', err);
     }
   }
 
-  // Fall back to Local Master Database (uploaded Excel / CSV records)
-  const masterDb = getMasterDatabase();
-  const match = masterDb.find((s) => {
+  // Fetch or retrieve latest Master Database from published Google Sheet CSV
+  let masterDb = getMasterDatabase();
+  let match = masterDb.find((s) => {
     const dbRoll = s.roll.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-    if (!dbRoll || dbRoll.includes('ROLL')) return false; // Ignore header rows
-
+    if (!dbRoll || dbRoll.includes('ROLL')) return false;
     return dbRoll === cleanRoll;
   });
+
+  // If not found in cache, fetch fresh copy from live published Google Sheet CSV
+  if (!match) {
+    masterDb = await fetchMasterDatabaseFromLiveSheet();
+    match = masterDb.find((s) => {
+      const dbRoll = s.roll.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      if (!dbRoll || dbRoll.includes('ROLL')) return false;
+      return dbRoll === cleanRoll;
+    });
+  }
 
   if (match) {
     return {
@@ -157,7 +242,7 @@ export async function verifyStudent(rollNumber: string, email: string): Promise<
       data: {
         roll: match.roll.trim().toUpperCase(),
         name: match.name.trim(),
-        email: match.email.trim().toLowerCase(),
+        email: match.email.trim().toLowerCase() || cleanEmail,
       },
     };
   }
