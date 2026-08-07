@@ -18,6 +18,23 @@ export default function StudentPortalPage() {
 
   const passRef = useRef<HTMLDivElement>(null);
 
+  // Restore saved student entry pass from localStorage on mount (Prevents refresh logouts)
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const savedSession = localStorage.getItem('EVENTQR_STUDENT_SESSION');
+      if (savedSession) {
+        const { profile, hex } = JSON.parse(savedSession);
+        if (profile && hex) {
+          setStudentProfile(profile);
+          setEncryptedHex(hex);
+        }
+      }
+    } catch (e) {
+      console.warn('Could not restore saved student session:', e);
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rollNumber.trim() || !email.trim()) {
@@ -47,6 +64,13 @@ export default function StudentPortalPage() {
 
         setStudentProfile(profile);
         setEncryptedHex(hex);
+
+        // Persist session on student device so ticket stays displayed
+        try {
+          localStorage.setItem('EVENTQR_STUDENT_SESSION', JSON.stringify({ profile, hex }));
+        } catch (e) {
+          console.warn('Could not save student session:', e);
+        }
       } else {
         setErrorMessage(res.message || 'Access Denied: Submitted credentials were not found in the master participant list.');
       }
@@ -81,6 +105,11 @@ export default function StudentPortalPage() {
   };
 
   const handleReset = () => {
+    try {
+      localStorage.removeItem('EVENTQR_STUDENT_SESSION');
+    } catch (e) {
+      // ignore
+    }
     setStudentProfile(null);
     setEncryptedHex(null);
     setErrorMessage(null);
