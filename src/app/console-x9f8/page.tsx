@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeScanner } from 'html5-qrcode';
 import { decryptPayload, StudentProfile } from '@/lib/cryptoEngine';
 import {
   checkInStudent,
@@ -146,8 +146,10 @@ export default function ObscuredAdminConsolePage() {
     setStatus('IDLE');
   };
 
-  // Process and Decrypt Payload (Supports Encrypted Hex, Plain Roll Number, or JSON QR codes)
+  // Process and Decrypt Payload (Supports Encrypted Hex, Plain Roll Number, URLs, or JSON QR codes)
   const handleProcessPayload = async (hexText: string, studentName?: string, studentEmail?: string) => {
+    if (!hexText || !hexText.trim()) return;
+
     setStatus('PROCESSING');
     setErrorMessage(null);
     setScannedResult(null);
@@ -157,12 +159,27 @@ export default function ObscuredAdminConsolePage() {
 
     try {
       if (!studentName) {
+        const cleanText = hexText.trim();
+
+        // 1. Try multi-layer AES/3DES decryption first
         try {
-          profile = decryptPayload(hexText);
+          profile = decryptPayload(cleanText);
         } catch (decErr) {
-          // Fallback: If QR is not encrypted hex, handle plain JSON or raw Roll Number
-          const cleanText = hexText.trim();
-          if (cleanText.startsWith('{') && cleanText.endsWith('}')) {
+          // 2. Parse URL query params if QR is a URL (e.g. ?roll=2024CS01)
+          if (cleanText.includes('roll=')) {
+            const urlMatch = cleanText.match(/roll=([a-zA-Z0-9]+)/i);
+            if (urlMatch && urlMatch[1]) {
+              profile = {
+                roll: urlMatch[1].toUpperCase(),
+                name: 'Participant',
+                email: '',
+                ts: Math.floor(Date.now() / 1000),
+              };
+            }
+          }
+
+          // 3. Parse JSON QR payload
+          if (!profile && cleanText.startsWith('{') && cleanText.endsWith('}')) {
             try {
               const parsed = JSON.parse(cleanText);
               profile = {
@@ -176,6 +193,7 @@ export default function ObscuredAdminConsolePage() {
             }
           }
 
+          // 4. Raw Roll Number fallback
           if (!profile || !profile.roll) {
             profile = {
               roll: cleanText.replace(/[^a-zA-Z0-9]/g, '').toUpperCase(),
@@ -228,15 +246,14 @@ export default function ObscuredAdminConsolePage() {
     processPayloadRef.current = handleProcessPayload;
   });
 
-  // Start Camera Scanning
+  // Start Camera Scanning with Html5QrcodeScanner Engine
   useEffect(() => {
     if (role === 'NONE' || activeTab !== 'SCANNER') return;
 
-    let html5Qrcode: Html5Qrcode;
+    let scannerInstance: Html5QrcodeScanner | null = null;
 
     const onScanSuccess = (decodedText: string) => {
-      if (!isScanningRef.current) return;
-      isScanningRef.current = false;
+      console.log('QR Code Captured:', decodedText);
       processPayloadRef.current(decodedText);
     };
 
@@ -244,42 +261,32 @@ export default function ObscuredAdminConsolePage() {
       // Silent ignore frame decode misses
     };
 
-    const startScanner = async () => {
-      try {
-        isScanningRef.current = true;
-        setStatus('SCANNING');
+    try {
+      setStatus('SCANNING');
 
-        html5Qrcode = new Html5Qrcode(scannerContainerId);
-        scannerRef.current = html5Qrcode;
-
-        const config = {
+      scannerInstance = new Html5QrcodeScanner(
+        scannerContainerId,
+        {
           fps: 10,
-          qrbox: { width: 260, height: 260 },
-          aspectRatio: 1.0,
-        };
+          qrbox: { width: 250, height: 250 },
+          rememberLastUsedCamera: true,
+          showTorchButtonIfSupported: true,
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true,
+          },
+        },
+        /* verbose= */ false
+      );
 
-        await html5Qrcode.start(
-          { facingMode: 'environment' }, // Rear mobile camera
-          config,
-          onScanSuccess,
-          onScanFailure
-        );
-      } catch (err) {
-        console.error('Camera Access Error:', err);
-        setErrorMessage('Camera access permission denied or no camera device found.');
-      }
-    };
-
-    startScanner();
+      scannerInstance.render(onScanSuccess, onScanFailure);
+    } catch (err: any) {
+      console.error('Camera Access Error:', err);
+      setErrorMessage('Camera access error: ' + (err.message || 'Permission denied or no camera device found.'));
+    }
 
     return () => {
-      if (scannerRef.current && isScanningRef.current) {
-        scannerRef.current
-          .stop()
-          .catch((err) => console.warn('Error stopping scanner:', err))
-          .finally(() => {
-            isScanningRef.current = false;
-          });
+      if (scannerInstance) {
+        scannerInstance.clear().catch((err) => console.warn('Error clearing scanner:', err));
       }
     };
   }, [role, activeTab]);
@@ -659,40 +666,84 @@ export default function ObscuredAdminConsolePage() {
             </div>
           </div>
 
-          {/* Manual Roll Number Search & Image QR Upload Fallbacks */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="glass-card rounded-2xl p-4 border border-slate-800">
-              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Search className="w-3.5 h-3.5 text-cyan-400" /> Manual Gate Search
-              </h3>
-              <form onSubmit={handleManualSearch} className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Roll No (e.g. 2024CS01)"
-                  value={manualRoll}
-                  onChange={(e) => setManualRoll(e.target.value)}
-                  className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono outline-none focus:border-cyan-500"
-                />
-                <button
-                  type="submit"
-                  className="px-3 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs transition shrink-0"
-                >
-                  Check In
-                </button>
-              </form>
-            </div>
+          {/* Persistent Scanned Student Details Card */}
+          {(scannedResult || decryptedStudent || status === 'INVALID') && (
+            <div className="mb-4 glass-panel rounded-2xl p-5 border border-cyan-500/30 bg-slate-900/90 shadow-xl space-y-3 animate-fade-in">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-cyan-400" /> Scanned Student Details
+                </span>
+                {status === 'SUCCESS' && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">
+                    ✅ CHECK-IN CONFIRMED
+                  </span>
+                )}
+                {status === 'DUPLICATE' && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-950 text-amber-400 border border-amber-800 text-[10px] font-bold">
+                    ⚠️ DUPLICATE ENTRY
+                  </span>
+                )}
+                {status === 'INVALID' && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-red-950 text-red-400 border border-red-800 text-[10px] font-bold">
+                    🛑 INVALID TICKET
+                  </span>
+                )}
+              </div>
 
-            <div className="glass-card rounded-2xl p-4 border border-slate-800">
-              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Camera className="w-3.5 h-3.5 text-emerald-400" /> Upload QR Image File
-              </h3>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleQrImageUpload}
-                className="w-full text-[11px] text-slate-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[11px] file:font-semibold file:bg-emerald-950 file:text-emerald-400 hover:file:bg-emerald-900 border border-slate-800 rounded-xl p-1 bg-slate-900 cursor-pointer"
-              />
+              {status !== 'INVALID' ? (
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <p className="text-[10px] uppercase font-mono text-slate-500">Student Name</p>
+                    <p className="font-bold text-white text-sm leading-tight">
+                      {scannedResult?.data?.name || decryptedStudent?.name || 'Authorized Student'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase font-mono text-slate-500">Roll Number</p>
+                    <p className="font-bold text-cyan-400 font-mono text-sm leading-tight">
+                      {scannedResult?.data?.roll || decryptedStudent?.roll}
+                    </p>
+                  </div>
+                  {scannedResult?.data?.email && (
+                    <div className="col-span-2">
+                      <p className="text-[10px] uppercase font-mono text-slate-500">Registered Email</p>
+                      <p className="font-medium text-slate-300 font-mono">{scannedResult.data.email}</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-red-400 font-semibold">{errorMessage}</p>
+              )}
+
+              <button
+                onClick={handleResumeScanning}
+                className="w-full py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition mt-2"
+              >
+                Scan Next Student
+              </button>
             </div>
+          )}
+
+          {/* Manual Roll Number Search Fallback */}
+          <div className="glass-card rounded-2xl p-4 border border-slate-800 mb-6">
+            <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Search className="w-3.5 h-3.5 text-cyan-400" /> Manual Gate Search
+            </h3>
+            <form onSubmit={handleManualSearch} className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Enter Roll Number (e.g. 2024CS01)"
+                value={manualRoll}
+                onChange={(e) => setManualRoll(e.target.value)}
+                className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono outline-none focus:border-cyan-500"
+              />
+              <button
+                type="submit"
+                className="px-4 py-2.5 rounded-xl bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs transition shrink-0"
+              >
+                Check In
+              </button>
+            </form>
           </div>
         </>
       ) : (
