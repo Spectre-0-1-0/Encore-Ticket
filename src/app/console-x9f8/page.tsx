@@ -235,6 +235,7 @@ export default function ObscuredAdminConsolePage() {
       return (window as any).XLSX;
     }
     try {
+      // @ts-ignore
       const XLSX = await import('xlsx');
       return XLSX;
     } catch (e) {
