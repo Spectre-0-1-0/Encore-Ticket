@@ -246,11 +246,11 @@ export default function ObscuredAdminConsolePage() {
     processPayloadRef.current = handleProcessPayload;
   });
 
-  // Start Camera Scanning with Html5QrcodeScanner Engine
+  // Start Camera Scanning with Instant Auto-Start Engine
   useEffect(() => {
     if (role === 'NONE' || activeTab !== 'SCANNER') return;
 
-    let scannerInstance: Html5QrcodeScanner | null = null;
+    let html5Qrcode: Html5Qrcode;
 
     const onScanSuccess = (decodedText: string) => {
       console.log('QR Code Captured:', decodedText);
@@ -261,32 +261,52 @@ export default function ObscuredAdminConsolePage() {
       // Silent ignore frame decode misses
     };
 
-    try {
-      setStatus('SCANNING');
+    const startScanner = async () => {
+      try {
+        setStatus('SCANNING');
 
-      scannerInstance = new Html5QrcodeScanner(
-        scannerContainerId,
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          rememberLastUsedCamera: true,
-          showTorchButtonIfSupported: true,
-          experimentalFeatures: {
-            useBarCodeDetectorIfSupported: true,
+        html5Qrcode = new Html5Qrcode(scannerContainerId);
+        scannerRef.current = html5Qrcode;
+
+        const config = {
+          fps: 15,
+          qrbox: (w: number, h: number) => {
+            const minDim = Math.min(w, h);
+            const boxSize = Math.max(160, Math.floor(minDim * 0.75));
+            return { width: boxSize, height: boxSize };
           },
-        },
-        /* verbose= */ false
-      );
+          aspectRatio: 1.0,
+        };
 
-      scannerInstance.render(onScanSuccess, onScanFailure);
-    } catch (err: any) {
-      console.error('Camera Access Error:', err);
-      setErrorMessage('Camera access error: ' + (err.message || 'Permission denied or no camera device found.'));
-    }
+        try {
+          await html5Qrcode.start(
+            { facingMode: 'environment' },
+            config,
+            onScanSuccess,
+            onScanFailure
+          );
+        } catch (e) {
+          console.warn('Rear camera failed, falling back to front/user camera:', e);
+          await html5Qrcode.start(
+            { facingMode: 'user' },
+            config,
+            onScanSuccess,
+            onScanFailure
+          );
+        }
+      } catch (err: any) {
+        console.error('Camera Access Error:', err);
+        setErrorMessage('Camera access error: Please grant camera permissions in your mobile browser settings.');
+      }
+    };
+
+    startScanner();
 
     return () => {
-      if (scannerInstance) {
-        scannerInstance.clear().catch((err) => console.warn('Error clearing scanner:', err));
+      if (scannerRef.current) {
+        scannerRef.current
+          .stop()
+          .catch((err) => console.warn('Error stopping scanner:', err));
       }
     };
   }, [role, activeTab]);

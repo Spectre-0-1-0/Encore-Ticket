@@ -57,3 +57,30 @@ body {
 .animate-scan-line {
   animation: scan-line 2.5s ease-in-out infinite;
 }
+
+/* Html5Qrcode Scanner Clean Styling */
+#html5-qr-reader {
+  border: none !important;
+  width: 100% !important;
+  background: transparent !important;
+}
+
+#html5-qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 1.5rem !important;
+}
+
+#html5-qr-reader__scan_region {
+  border: none !important;
+  background: transparent !important;
+}
+
+#html5-qr-reader__dashboard {
+  display: none !important;
+}
+
+#html5-qr-reader img {
+  display: none !important;
+}
