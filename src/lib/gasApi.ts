@@ -20,12 +20,6 @@ export interface CheckInResponse {
   };
 }
 
-const GAS_API_URL = process.env.NEXT_PUBLIC_GAS_API_URL || '';
-
-function isPlaceholderUrl(url: string): boolean {
-  return !url || url.includes('AKfycbx_EXAMPLE_SCRIPT_ID') || !url.startsWith('https://script.google.com');
-}
-
 export interface StudentRecord {
   roll: string;
   name: string;
@@ -38,6 +32,31 @@ const DEFAULT_MASTER_DB: StudentRecord[] = [
   { roll: '2024EE05', name: 'Sophia Smith', email: 'sophia@example.com' },
   { roll: '2024ME12', name: 'Rahul Verma', email: 'rahul@example.com' },
 ];
+
+/**
+ * Get active Google Apps Script Webhook API URL from localStorage or env
+ */
+export function getGasApiUrl(): string {
+  if (typeof window !== 'undefined') {
+    const savedUrl = localStorage.getItem('EVENTQR_GAS_API_URL');
+    if (savedUrl && savedUrl.trim().startsWith('https://script.google.com')) {
+      return savedUrl.trim();
+    }
+  }
+  return process.env.NEXT_PUBLIC_GAS_API_URL || '';
+}
+
+/**
+ * Save custom Google Apps Script Webhook API URL
+ */
+export function setGasApiUrl(url: string): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('EVENTQR_GAS_API_URL', url.trim());
+}
+
+function isPlaceholderUrl(url: string): boolean {
+  return !url || url.includes('AKfycbx_EXAMPLE_SCRIPT_ID') || !url.startsWith('https://script.google.com');
+}
 
 /**
  * Get current Master Database records from localStorage or defaults
@@ -59,88 +78,91 @@ export function getMasterDatabase(): StudentRecord[] {
 }
 
 /**
- * Save new Master Database records to localStorage
+ * Save new Master Database records to localStorage and sync to GAS backend if connected
  */
-export function saveMasterDatabase(records: StudentRecord[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem('EVENTQR_MASTER_DB', JSON.stringify(records));
-  } catch (e) {
-    console.error('Failed to save Master DB to localStorage', e);
+export async function saveMasterDatabase(records: StudentRecord[]): Promise<void> {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('EVENTQR_MASTER_DB', JSON.stringify(records));
+    } catch (e) {
+      console.error('Failed to save Master DB to localStorage', e);
+    }
+  }
+
+  const apiUrl = getGasApiUrl();
+  if (!isPlaceholderUrl(apiUrl)) {
+    try {
+      await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'upload_master',
+          records: records,
+        }),
+      });
+    } catch (err) {
+      console.warn('Failed to sync master database to Google Sheets backend:', err);
+    }
   }
 }
 
 /**
- * Verify Student credentials against Student_Master database
+ * Verify Student credentials against Student_Master database (GAS API & Local Storage)
  */
 export async function verifyStudent(rollNumber: string, email: string): Promise<VerifyResponse> {
-  const cleanRoll = rollNumber.trim().toUpperCase();
+  const cleanRoll = rollNumber.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const cleanEmail = email.trim().toLowerCase();
+  const apiUrl = getGasApiUrl();
 
-  if (isPlaceholderUrl(GAS_API_URL)) {
-    await new Promise((resolve) => setTimeout(resolve, 500)); // Simulate network latency
+  // Try Google Apps Script API first if configured
+  if (!isPlaceholderUrl(apiUrl)) {
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'verify_student',
+          rollNumber: rollNumber.trim().toUpperCase(),
+          email: cleanEmail,
+        }),
+      });
 
-    const masterDb = getMasterDatabase();
-    const match = masterDb.find(
-      (s) => s.roll.trim().toUpperCase() === cleanRoll && s.email.trim().toLowerCase() === cleanEmail
-    );
-
-    if (match) {
-      return {
-        status: 'SUCCESS',
-        data: {
-          roll: match.roll.trim().toUpperCase(),
-          name: match.name.trim(),
-          email: match.email.trim().toLowerCase(),
-        },
-      };
-    } else {
-      return {
-        status: 'DENIED',
-        message: 'Access Denied: Submitted credentials were not found in the master participant list.',
-      };
+      const data: VerifyResponse = await response.json();
+      if (data.status === 'SUCCESS' && data.data) {
+        return data;
+      }
+    } catch (err: any) {
+      console.warn('GAS Verification API Error, falling back to local database:', err);
     }
   }
 
-  try {
-    const response = await fetch(GAS_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8', // Apps Script CORS requirement
-      },
-      body: JSON.stringify({
-        action: 'verify_student',
-        rollNumber: cleanRoll,
-        email: cleanEmail,
-      }),
-    });
+  // Fall back to Local Master Database (uploaded Excel / CSV records)
+  const masterDb = getMasterDatabase();
+  const match = masterDb.find((s) => {
+    const dbRoll = s.roll.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const dbEmail = s.email.trim().toLowerCase();
 
-    const data: VerifyResponse = await response.json();
-    return data;
-  } catch (err: any) {
-    console.error('GAS Verification Fetch Error:', err);
-    // Fallback to local master database lookup if API fetch fails or CORS issue
-    const masterDb = getMasterDatabase();
-    const match = masterDb.find(
-      (s) => s.roll.trim().toUpperCase() === cleanRoll && s.email.trim().toLowerCase() === cleanEmail
-    );
+    const rollMatches = dbRoll === cleanRoll || s.roll.trim().toUpperCase() === rollNumber.trim().toUpperCase();
+    const emailMatches = dbEmail === cleanEmail || dbEmail.split('@')[0] === cleanEmail.split('@')[0];
 
-    if (match) {
-      return {
-        status: 'SUCCESS',
-        data: {
-          roll: match.roll.trim().toUpperCase(),
-          name: match.name.trim(),
-          email: match.email.trim().toLowerCase(),
-        },
-      };
-    }
+    return rollMatches && emailMatches;
+  });
 
+  if (match) {
     return {
-      status: 'DENIED',
-      message: 'Access Denied: Submitted credentials were not found in the master participant list.',
+      status: 'SUCCESS',
+      data: {
+        roll: match.roll.trim().toUpperCase(),
+        name: match.name.trim(),
+        email: match.email.trim().toLowerCase(),
+      },
     };
   }
+
+  return {
+    status: 'DENIED',
+    message: 'Access Denied: Submitted credentials were not found in the master participant list.',
+  };
 }
 
 // In-memory mock check-in log for testing mode
@@ -155,8 +177,9 @@ export async function checkInStudent(
   email: string,
   deviceId: string = 'GATE_SCANNER_01'
 ): Promise<CheckInResponse> {
-  if (isPlaceholderUrl(GAS_API_URL)) {
-    console.warn('GAS_API_URL is placeholder or missing. Using mock attendance logger for testing.');
+  const apiUrl = getGasApiUrl();
+
+  if (isPlaceholderUrl(apiUrl)) {
     await new Promise((resolve) => setTimeout(resolve, 600));
 
     const cleanRoll = rollNumber.trim().toUpperCase();
@@ -194,7 +217,7 @@ export async function checkInStudent(
   }
 
   try {
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
@@ -211,10 +234,38 @@ export async function checkInStudent(
     const data: CheckInResponse = await response.json();
     return data;
   } catch (err: any) {
-    console.error('GAS Check-in Fetch Error:', err);
+    console.warn('GAS Check-in Fetch Error, using local attendance logger:', err);
+    const cleanRoll = rollNumber.trim().toUpperCase();
+
+    if (mockAttendanceLogs.has(cleanRoll)) {
+      const existing = mockAttendanceLogs.get(cleanRoll)!;
+      return {
+        status: 'DUPLICATE',
+        message: `WARNING: Duplicate Entry! ${existing.name} (${cleanRoll}) already checked in!`,
+        data: {
+          roll: cleanRoll,
+          name: existing.name,
+          email: existing.email,
+          timestamp: existing.timestamp,
+          deviceId: existing.deviceId,
+        },
+      };
+    }
+
+    const now = new Date().toISOString();
+    const newEntry = { name, email, timestamp: now, deviceId };
+    mockAttendanceLogs.set(cleanRoll, newEntry);
+
     return {
-      status: 'ERROR',
-      message: 'Failed to record check-in on backend: ' + err.message,
+      status: 'SUCCESS',
+      message: 'CHECK-IN CONFIRMED',
+      data: {
+        roll: cleanRoll,
+        name: name,
+        email: email,
+        timestamp: now,
+        deviceId: deviceId,
+      },
     };
   }
 }
