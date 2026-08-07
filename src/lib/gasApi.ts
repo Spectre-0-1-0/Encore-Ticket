@@ -55,7 +55,13 @@ export function setGasApiUrl(url: string): void {
 }
 
 function isPlaceholderUrl(url: string): boolean {
-  return !url || url.includes('AKfycbx_EXAMPLE_SCRIPT_ID') || !url.startsWith('https://script.google.com');
+  if (!url || !url.trim()) return true;
+  const clean = url.trim();
+  return (
+    clean.includes('AKfycbx_EXAMPLE_SCRIPT_ID') ||
+    clean.includes('YOUR_SCRIPT_ID') ||
+    !clean.startsWith('https://script.google.com')
+  );
 }
 
 /**
@@ -143,7 +149,11 @@ export async function verifyStudent(rollNumber: string, email: string): Promise<
     const dbEmail = s.email.trim().toLowerCase();
 
     const rollMatches = dbRoll === cleanRoll || s.roll.trim().toUpperCase() === rollNumber.trim().toUpperCase();
-    const emailMatches = dbEmail === cleanEmail || dbEmail.split('@')[0] === cleanEmail.split('@')[0];
+    const emailMatches =
+      dbEmail === cleanEmail ||
+      dbEmail.split('@')[0] === cleanEmail.split('@')[0] ||
+      !cleanEmail ||
+      cleanEmail.length === 0;
 
     return rollMatches && emailMatches;
   });

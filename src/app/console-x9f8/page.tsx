@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { decryptPayload, StudentProfile } from '@/lib/cryptoEngine';
-import { checkInStudent, CheckInResponse, getMasterDatabase, saveMasterDatabase, StudentRecord } from '@/lib/gasApi';
+import { checkInStudent, CheckInResponse, getMasterDatabase, saveMasterDatabase, StudentRecord, getGasApiUrl, setGasApiUrl } from '@/lib/gasApi';
 import { soundEngine } from '@/lib/audioEngine';
 import {
   ShieldAlert,
@@ -54,9 +54,11 @@ export default function ObscuredAdminConsolePage() {
   // Gate Statistics Counter
   const [checkInCount, setCheckInCount] = useState(0);
 
-  // Master Database Upload State (Superadmin)
+  // Master Database & Google Sheet Webhook State (Superadmin)
   const [masterRecords, setMasterRecords] = useState<StudentRecord[]>([]);
   const [csvInputText, setCsvInputText] = useState('');
+  const [webhookUrlInput, setWebhookUrlInput] = useState('');
+  const [webhookStatusMsg, setWebhookStatusMsg] = useState<string | null>(null);
   const [uploadSuccessMsg, setUploadSuccessMsg] = useState<string | null>(null);
   const [uploadErrorMsg, setUploadErrorMsg] = useState<string | null>(null);
 
@@ -68,10 +70,21 @@ export default function ObscuredAdminConsolePage() {
   const EXPECTED_ADMIN_PASSCODE = process.env.NEXT_PUBLIC_ADMIN_PASSCODE || 'admin123';
   const EXPECTED_SUPERADMIN_PASSCODE = process.env.NEXT_PUBLIC_SUPERADMIN_PASSCODE || 'superadmin2026';
 
-  // Load initial Master Database records on mount
+  // Load initial Master Database records and Webhook URL on mount
   useEffect(() => {
     setMasterRecords(getMasterDatabase());
+    setWebhookUrlInput(getGasApiUrl());
   }, []);
+
+  const handleSaveWebhook = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!webhookUrlInput.trim().startsWith('https://script.google.com')) {
+      setWebhookStatusMsg('Error: Webhook URL must begin with https://script.google.com');
+      return;
+    }
+    setGasApiUrl(webhookUrlInput.trim());
+    setWebhookStatusMsg('✅ Live Google Sheet Webhook URL saved successfully!');
+  };
 
   // Handle Passcode Login
   const handleLogin = (e: React.FormEvent) => {
@@ -589,6 +602,36 @@ export default function ObscuredAdminConsolePage() {
       ) : (
         /* MASTER SHEET DATABASE UPLOAD TAB (Superadmin Only) */
         <div className="space-y-6">
+          {/* Live Google Sheet Webhook Integration Card */}
+          <div className="glass-panel rounded-2xl p-5 border border-cyan-500/30 bg-slate-900/90 shadow-xl space-y-3">
+            <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 text-cyan-400" /> Live Google Sheet Webhook Connection
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              Paste your deployed Google Apps Script Web App URL below to sync logins and attendance directly with your live Google Sheet in real time.
+            </p>
+
+            <form onSubmit={handleSaveWebhook} className="flex gap-2">
+              <input
+                type="url"
+                placeholder="https://script.google.com/macros/s/.../exec"
+                value={webhookUrlInput}
+                onChange={(e) => setWebhookUrlInput(e.target.value)}
+                className="flex-1 bg-slate-950 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono outline-none focus:border-cyan-500"
+              />
+              <button
+                type="submit"
+                className="px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition shrink-0"
+              >
+                Connect Webhook
+              </button>
+            </form>
+
+            {webhookStatusMsg && (
+              <p className="text-[11px] font-mono text-emerald-400 font-semibold">{webhookStatusMsg}</p>
+            )}
+          </div>
+
           <div className="glass-panel rounded-2xl p-6 border border-purple-500/20 shadow-xl space-y-5">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>

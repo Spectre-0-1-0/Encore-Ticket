@@ -47,6 +47,8 @@ function handleRequest(e) {
       return handleVerifyStudent(payload);
     } else if (action === "check_in") {
       return handleCheckIn(payload);
+    } else if (action === "upload_master") {
+      return handleUploadMaster(payload);
     } else if (action === "ping") {
       return createJsonResponse({ status: "SUCCESS", message: "API active" });
     } else {
@@ -69,10 +71,10 @@ function handleVerifyStudent(payload) {
   const rollNumber = (payload.rollNumber || "").toString().trim().toUpperCase();
   const email = (payload.email || "").toString().trim().toLowerCase();
 
-  if (!rollNumber || !email) {
+  if (!rollNumber) {
     return createJsonResponse({
       status: "ERROR",
-      message: "Roll Number and Email are required."
+      message: "Roll Number is required."
     });
   }
 
@@ -86,12 +88,17 @@ function handleVerifyStudent(payload) {
     });
   }
 
+  const cleanRoll = rollNumber.replace(/[^A-Z0-9]/g, "");
+  const emailUsername = email.split('@')[0];
+
   const data = masterSheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     const rowRoll = data[i][0].toString().trim().toUpperCase();
+    const cleanRowRoll = rowRoll.replace(/[^A-Z0-9]/g, "");
     const rowEmail = data[i][2].toString().trim().toLowerCase();
+    const rowEmailUsername = rowEmail.split('@')[0];
 
-    if (rowRoll === rollNumber && rowEmail === email) {
+    if (cleanRowRoll === cleanRoll && (rowEmail === email || rowEmailUsername === emailUsername || !email)) {
       masterSheet.getRange(i + 1, 4).setValue(true); // Set Account_Created = true
       
       return createJsonResponse({
@@ -167,6 +174,42 @@ function handleCheckIn(payload) {
       timestamp: now,
       deviceId: deviceId
     }
+  });
+}
+
+function handleUploadMaster(payload) {
+  const records = payload.records || [];
+  if (!Array.isArray(records) || records.length === 0) {
+    return createJsonResponse({
+      status: "ERROR",
+      message: "No valid student records provided."
+    });
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let masterSheet = ss.getSheetByName(SHEET_STUDENT_MASTER);
+
+  if (!masterSheet) {
+    masterSheet = ss.insertSheet(SHEET_STUDENT_MASTER);
+    masterSheet.appendRow(["Roll_Number", "Student_Name", "Email_Address", "Account_Created"]);
+  } else {
+    masterSheet.clearContents();
+    masterSheet.appendRow(["Roll_Number", "Student_Name", "Email_Address", "Account_Created"]);
+  }
+
+  const rows = [];
+  for (let i = 0; i < records.length; i++) {
+    const r = records[i];
+    rows.push([r.roll || "", r.name || "", r.email || "", false]);
+  }
+
+  if (rows.length > 0) {
+    masterSheet.getRange(2, 1, rows.length, 4).setValues(rows);
+  }
+
+  return createJsonResponse({
+    status: "SUCCESS",
+    message: "Master Database updated with " + rows.length + " records."
   });
 }
 
