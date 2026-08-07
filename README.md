@@ -99,22 +99,11 @@ Complete documentation is available in the [`docs/`](./docs/) directory:
    npm install
    ```
 
-3. **Set up Environment Variables**:
-   Create a `.env.local` file in the root directory:
-   ```env
-   NEXT_PUBLIC_GAS_API_URL=https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec
-   NEXT_PUBLIC_AES_SECRET_KEY=YourSuperSecretAES256Key32Chars
-   NEXT_PUBLIC_3DES_SECRET_KEY=YourSuperSecretTripleDESKey24
-   NEXT_PUBLIC_HMAC_SALT=YourSuperSecretHMACSaltValue
-   NEXT_PUBLIC_XOR_SHIFT_BYTE=0x5A
-   NEXT_PUBLIC_ADMIN_PASSCODE=admin123
-   ```
-
-4. **Run the Development Server**:
+3. **Run the Development Server**:
    ```bash
    npm run dev
    ```
-   Open [http://localhost:3000](http://localhost:3000) for the Student Portal and [http://localhost:3000/admin](http://localhost:3000/admin) for the Admin Scanner App.
+   Open [http://localhost:3000](http://localhost:3000) for the Student Portal and [http://localhost:3000/admin](http://localhost:3000/admin) for the Admin Control & Scanner App.
 
 ---
 

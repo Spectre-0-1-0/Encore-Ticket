@@ -2,9 +2,26 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Anti-Fraud Event Access Control & Encrypted QR Pass',
+  title: 'ENcore Anti-Fraud Event Access & Ticket Pass',
   description:
-    'Privacy-first, zero-trust event ticketing and real-time attendance management platform with multi-layer cryptographic QR obfuscation.',
+    'Privacy-first event ticketing and real-time attendance management platform with encrypted QR access control.',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'ENcore Pass',
+  },
+  formatDetection: {
+    telephone: false,
+  },
+};
+
+export const viewport = {
+  themeColor: '#06b6d4',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({
