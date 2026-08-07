@@ -146,63 +146,6 @@ export default function ObscuredAdminConsolePage() {
     setStatus('IDLE');
   };
 
-  // Start Camera Scanning
-  useEffect(() => {
-    if (role === 'NONE' || activeTab !== 'SCANNER') return;
-
-    let html5Qrcode: Html5Qrcode;
-
-    const startScanner = async () => {
-      try {
-        html5Qrcode = new Html5Qrcode(scannerContainerId);
-        scannerRef.current = html5Qrcode;
-
-        const config = {
-          fps: 10,
-          qrbox: { width: 260, height: 260 },
-          aspectRatio: 1.0,
-        };
-
-        await html5Qrcode.start(
-          { facingMode: 'environment' }, // Rear mobile camera
-          config,
-          onScanSuccess,
-          onScanFailure
-        );
-
-        isScanningRef.current = true;
-        setStatus('SCANNING');
-      } catch (err) {
-        console.error('Camera Access Error:', err);
-        setErrorMessage('Camera access permission denied or no camera device found.');
-      }
-    };
-
-    startScanner();
-
-    return () => {
-      if (scannerRef.current && isScanningRef.current) {
-        scannerRef.current
-          .stop()
-          .catch((err) => console.warn('Error stopping scanner:', err))
-          .finally(() => {
-            isScanningRef.current = false;
-          });
-      }
-    };
-  }, [role, activeTab]);
-
-  // Callback when a QR frame is captured by html5-qrcode
-  const onScanSuccess = (decodedText: string) => {
-    if (!isScanningRef.current) return;
-    isScanningRef.current = false;
-    handleProcessPayload(decodedText);
-  };
-
-  const onScanFailure = (error: any) => {
-    // Silent ignore frame decode misses
-  };
-
   // Process and Decrypt Payload (Supports Encrypted Hex, Plain Roll Number, or JSON QR codes)
   const handleProcessPayload = async (hexText: string, studentName?: string, studentEmail?: string) => {
     setStatus('PROCESSING');
@@ -279,6 +222,68 @@ export default function ObscuredAdminConsolePage() {
     }
   };
 
+  // Ref to always hold fresh handleProcessPayload
+  const processPayloadRef = useRef(handleProcessPayload);
+  useEffect(() => {
+    processPayloadRef.current = handleProcessPayload;
+  });
+
+  // Start Camera Scanning
+  useEffect(() => {
+    if (role === 'NONE' || activeTab !== 'SCANNER') return;
+
+    let html5Qrcode: Html5Qrcode;
+
+    const onScanSuccess = (decodedText: string) => {
+      if (!isScanningRef.current) return;
+      isScanningRef.current = false;
+      processPayloadRef.current(decodedText);
+    };
+
+    const onScanFailure = (error: any) => {
+      // Silent ignore frame decode misses
+    };
+
+    const startScanner = async () => {
+      try {
+        isScanningRef.current = true;
+        setStatus('SCANNING');
+
+        html5Qrcode = new Html5Qrcode(scannerContainerId);
+        scannerRef.current = html5Qrcode;
+
+        const config = {
+          fps: 10,
+          qrbox: { width: 260, height: 260 },
+          aspectRatio: 1.0,
+        };
+
+        await html5Qrcode.start(
+          { facingMode: 'environment' }, // Rear mobile camera
+          config,
+          onScanSuccess,
+          onScanFailure
+        );
+      } catch (err) {
+        console.error('Camera Access Error:', err);
+        setErrorMessage('Camera access permission denied or no camera device found.');
+      }
+    };
+
+    startScanner();
+
+    return () => {
+      if (scannerRef.current && isScanningRef.current) {
+        scannerRef.current
+          .stop()
+          .catch((err) => console.warn('Error stopping scanner:', err))
+          .finally(() => {
+            isScanningRef.current = false;
+          });
+      }
+    };
+  }, [role, activeTab]);
+
   // Resume Camera Scanning after displaying result alert
   const handleResumeScanning = async () => {
     setStatus('SCANNING');
@@ -294,6 +299,28 @@ export default function ObscuredAdminConsolePage() {
     e.preventDefault();
     if (!manualRoll.trim()) return;
     handleProcessPayload(manualRoll.trim().toUpperCase(), 'Manual Gate Search', 'manual@event.com');
+  };
+
+  // Image QR File Scan Fallback
+  const handleQrImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      let scanner = scannerRef.current;
+      if (!scanner) {
+        scanner = new Html5Qrcode(scannerContainerId);
+      }
+
+      const decodedText = await scanner.scanFile(file, true);
+      if (decodedText) {
+        handleProcessPayload(decodedText);
+      }
+    } catch (err: any) {
+      console.error('Image QR Decode Error:', err);
+      setStatus('INVALID');
+      setErrorMessage('Could not decode QR code from image file. Try camera scan or manual search.');
+    }
   };
 
   // Dynamic XLSX Loader
@@ -632,26 +659,40 @@ export default function ObscuredAdminConsolePage() {
             </div>
           </div>
 
-          {/* Manual Roll Number Search Fallback */}
-          <div className="glass-card rounded-2xl p-4 border border-slate-800">
-            <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              <Search className="w-3.5 h-3.5 text-cyan-400" /> Manual Gate Search
-            </h3>
-            <form onSubmit={handleManualSearch} className="flex gap-2">
+          {/* Manual Roll Number Search & Image QR Upload Fallbacks */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="glass-card rounded-2xl p-4 border border-slate-800">
+              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Search className="w-3.5 h-3.5 text-cyan-400" /> Manual Gate Search
+              </h3>
+              <form onSubmit={handleManualSearch} className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Roll No (e.g. 2024CS01)"
+                  value={manualRoll}
+                  onChange={(e) => setManualRoll(e.target.value)}
+                  className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono outline-none focus:border-cyan-500"
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs transition shrink-0"
+                >
+                  Check In
+                </button>
+              </form>
+            </div>
+
+            <div className="glass-card rounded-2xl p-4 border border-slate-800">
+              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Camera className="w-3.5 h-3.5 text-emerald-400" /> Upload QR Image File
+              </h3>
               <input
-                type="text"
-                placeholder="Enter Roll Number (e.g. 2024CS01)"
-                value={manualRoll}
-                onChange={(e) => setManualRoll(e.target.value)}
-                className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono outline-none focus:border-cyan-500"
+                type="file"
+                accept="image/*"
+                onChange={handleQrImageUpload}
+                className="w-full text-[11px] text-slate-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[11px] file:font-semibold file:bg-emerald-950 file:text-emerald-400 hover:file:bg-emerald-900 border border-slate-800 rounded-xl p-1 bg-slate-900 cursor-pointer"
               />
-              <button
-                type="submit"
-                className="px-4 py-2.5 rounded-xl bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs transition shrink-0"
-              >
-                Check In
-              </button>
-            </form>
+            </div>
           </div>
         </>
       ) : (
