@@ -270,9 +270,10 @@ export default function ObscuredAdminConsolePage() {
     for (let line of lines) {
       line = line.trim();
       if (!line) continue;
-      if (line.toLowerCase().includes('roll') && line.toLowerCase().includes('email')) continue;
 
       const parts = line.split(',').map((p) => p.trim().replace(/^["']|["']$/g, ''));
+      if (parts[0].toUpperCase().includes('ROLL') || parts[0].toUpperCase().includes('STUDENT')) continue;
+
       if (parts.length >= 3) {
         parsed.push({
           roll: parts[0].toUpperCase(),
@@ -312,7 +313,7 @@ export default function ObscuredAdminConsolePage() {
         for (const row of rows) {
           if (!row || row.length === 0) continue;
           const rStr = row.map((cell) => String(cell || '').trim());
-          if (rStr.some((c) => c.toLowerCase().includes('roll') && c.toLowerCase().includes('email'))) continue;
+          if (rStr[0].toUpperCase().includes('ROLL') || rStr[0].toUpperCase().includes('STUDENT')) continue;
 
           if (rStr.length >= 3) {
             parsedRecords.push({

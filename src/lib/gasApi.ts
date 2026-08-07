@@ -146,16 +146,9 @@ export async function verifyStudent(rollNumber: string, email: string): Promise<
   const masterDb = getMasterDatabase();
   const match = masterDb.find((s) => {
     const dbRoll = s.roll.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-    const dbEmail = s.email.trim().toLowerCase();
+    if (!dbRoll || dbRoll.includes('ROLL')) return false; // Ignore header rows
 
-    const rollMatches = dbRoll === cleanRoll || s.roll.trim().toUpperCase() === rollNumber.trim().toUpperCase();
-    const emailMatches =
-      dbEmail === cleanEmail ||
-      dbEmail.split('@')[0] === cleanEmail.split('@')[0] ||
-      !cleanEmail ||
-      cleanEmail.length === 0;
-
-    return rollMatches && emailMatches;
+    return dbRoll === cleanRoll;
   });
 
   if (match) {
